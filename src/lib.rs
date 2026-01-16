@@ -217,40 +217,7 @@ fn resolve_via_sysfs(major: u32, minor: u32) -> Option<PathBuf> {
     let device_name = target.file_name()?.to_str()?;
 
     let dev_path = PathBuf::from(format!("/dev/{}", device_name));
-    if dev_path.exists() {
-        return Some(dev_path);
-    }
-
-    // Try to find the device in /dev recursively
-    find_device_in_dev(device_name)
-}
-
-/// Searches for a device with the given name in /dev.
-fn find_device_in_dev(device_name: &str) -> Option<PathBuf> {
-    // Common locations to check
-    let paths_to_check = [
-        format!("/dev/{}", device_name),
-        format!("/dev/mapper/{}", device_name),
-        format!("/dev/disk/by-id/{}", device_name),
-    ];
-
-    for path_str in &paths_to_check {
-        let path = PathBuf::from(path_str);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    // If still not found, try to find in /dev directory
-    if let Ok(entries) = fs::read_dir("/dev") {
-        for entry in entries.flatten() {
-            if entry.file_name().to_string_lossy() == device_name {
-                return Some(entry.path());
-            }
-        }
-    }
-
-    None
+    dev_path.exists().then_some(dev_path)
 }
 
 /// Resolves a device path by parsing /proc/self/mountinfo.

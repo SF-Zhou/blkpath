@@ -3,7 +3,6 @@
 [![CI](https://github.com/SF-Zhou/blkpath/actions/workflows/ci.yml/badge.svg)](https://github.com/SF-Zhou/blkpath/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/blkpath.svg)](https://crates.io/crates/blkpath)
 [![Documentation](https://docs.rs/blkpath/badge.svg)](https://docs.rs/blkpath)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Resolve the underlying block device path from a file path or file descriptor.
 
@@ -108,7 +107,3 @@ This multi-step approach ensures reliability across different Linux configuratio
 
 - Linux operating system
 - Access to `/sys/dev/block/` or `/proc/self/mountinfo`
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
