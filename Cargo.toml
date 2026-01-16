@@ -19,7 +19,6 @@ name = "blkpath"
 path = "src/bin/blkpath.rs"
 
 [dependencies]
-thiserror = "1.0"
 clap = { version = "4.4", features = ["derive"] }
 libc = "0.2"
 

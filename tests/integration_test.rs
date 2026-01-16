@@ -1,7 +1,8 @@
 //! Integration tests for blkpath crate.
 
-use blkpath::{resolve_device, resolve_device_from_file, DeviceResolveError, ResolveDevice};
+use blkpath::{resolve_device, resolve_device_from_file, ResolveDevice};
 use std::fs::File;
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// Test that resolving the root filesystem device works.
@@ -19,9 +20,9 @@ fn test_root_device_resolution() {
                 device.display()
             );
         }
-        Err(DeviceResolveError::DeviceNotFound { major, minor }) => {
+        Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
             // This can happen in some container environments
-            println!("Device not found for root: {}:{}", major, minor);
+            println!("Device not found for root");
         }
         Err(e) => {
             panic!("Unexpected error resolving root device: {}", e);
@@ -74,8 +75,8 @@ fn test_file_resolution() {
                 device.display()
             );
         }
-        Err(DeviceResolveError::DeviceNotFound { major, minor }) => {
-            println!("Device not found for file: {}:{}", major, minor);
+        Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+            println!("Device not found for file");
         }
         Err(e) => {
             panic!("Unexpected error resolving file device: {}", e);
@@ -97,8 +98,8 @@ fn test_file_reference_resolution() {
                 device.display()
             );
         }
-        Err(DeviceResolveError::DeviceNotFound { major, minor }) => {
-            println!("Device not found for file ref: {}:{}", major, minor);
+        Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+            println!("Device not found for file ref");
         }
         Err(e) => {
             panic!("Unexpected error resolving file device: {}", e);
@@ -114,7 +115,7 @@ fn test_nonexistent_path_returns_error() {
 
     assert!(result.is_err());
     match result {
-        Err(DeviceResolveError::MetadataError(_)) => { /* Expected */ }
+        Err(ref e) if e.kind() == io::ErrorKind::NotFound => { /* Expected */ }
         Err(e) => panic!("Unexpected error type: {:?}", e),
         Ok(_) => panic!("Should have failed"),
     }
@@ -143,7 +144,8 @@ fn test_proc_filesystem() {
         // /proc is a virtual filesystem, resolution may or may not succeed
         // depending on the system configuration
         match result {
-            Ok(_) | Err(DeviceResolveError::DeviceNotFound { .. }) => { /* Acceptable */ }
+            Ok(_) => { /* Acceptable */ }
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => { /* Acceptable */ }
             Err(e) => panic!("Unexpected error for /proc: {}", e),
         }
     }
@@ -163,7 +165,7 @@ fn test_tmp_directory() {
                     device.display()
                 );
             }
-            Err(DeviceResolveError::DeviceNotFound { .. }) => {
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                 // tmpfs may not have a block device
             }
             Err(e) => panic!("Unexpected error for /tmp: {}", e),

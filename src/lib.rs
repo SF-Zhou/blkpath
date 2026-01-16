@@ -43,51 +43,6 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
-use thiserror::Error;
-
-/// Errors that can occur during device resolution.
-#[derive(Error, Debug)]
-pub enum DeviceResolveError {
-    /// An I/O error occurred.
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
-
-    /// Failed to get file metadata.
-    #[error("Failed to get metadata for path: {0}")]
-    MetadataError(String),
-
-    /// Failed to resolve the device via sysfs.
-    #[error("Failed to resolve device via sysfs for dev {major}:{minor}")]
-    SysfsResolutionFailed {
-        /// Major device number
-        major: u32,
-        /// Minor device number
-        minor: u32,
-    },
-
-    /// Failed to resolve the device via mountinfo.
-    #[error("Failed to resolve device via mountinfo for dev {major}:{minor}")]
-    MountinfoResolutionFailed {
-        /// Major device number
-        major: u32,
-        /// Minor device number
-        minor: u32,
-    },
-
-    /// The device could not be resolved using any method.
-    #[error("Could not resolve device for dev {major}:{minor}")]
-    DeviceNotFound {
-        /// Major device number
-        major: u32,
-        /// Minor device number
-        minor: u32,
-    },
-
-    /// Failed to call fstat on file descriptor.
-    #[error("Failed to fstat file descriptor: {0}")]
-    FstatError(String),
-}
-
 /// A trait for resolving the underlying block device of a file or path.
 ///
 /// This trait is implemented for `Path` and `File`, allowing you to resolve
@@ -100,7 +55,7 @@ pub trait ResolveDevice {
     ///
     /// # Errors
     ///
-    /// Returns a `DeviceResolveError` if:
+    /// Returns an `io::Error` if:
     /// - The file/path cannot be accessed
     /// - The device information cannot be retrieved
     /// - The device cannot be mapped to a block device path
@@ -114,15 +69,14 @@ pub trait ResolveDevice {
     /// let path = Path::new("/home");
     /// let device = path.resolve_device()?;
     /// println!("Device: {}", device.display());
-    /// # Ok::<(), blkpath::DeviceResolveError>(())
+    /// # Ok::<(), std::io::Error>(())
     /// ```
-    fn resolve_device(&self) -> Result<PathBuf, DeviceResolveError>;
+    fn resolve_device(&self) -> io::Result<PathBuf>;
 }
 
 impl ResolveDevice for Path {
-    fn resolve_device(&self) -> Result<PathBuf, DeviceResolveError> {
-        let metadata = fs::metadata(self)
-            .map_err(|e| DeviceResolveError::MetadataError(format!("{}: {}", self.display(), e)))?;
+    fn resolve_device(&self) -> io::Result<PathBuf> {
+        let metadata = fs::metadata(self)?;
 
         let dev = metadata.dev();
         let major = major(dev);
@@ -133,13 +87,13 @@ impl ResolveDevice for Path {
 }
 
 impl ResolveDevice for PathBuf {
-    fn resolve_device(&self) -> Result<PathBuf, DeviceResolveError> {
+    fn resolve_device(&self) -> io::Result<PathBuf> {
         self.as_path().resolve_device()
     }
 }
 
 impl ResolveDevice for File {
-    fn resolve_device(&self) -> Result<PathBuf, DeviceResolveError> {
+    fn resolve_device(&self) -> io::Result<PathBuf> {
         let fd = self.as_raw_fd();
         let (major, minor) = get_dev_from_fd(fd)?;
         resolve_device_from_dev(major, minor)
@@ -147,7 +101,7 @@ impl ResolveDevice for File {
 }
 
 impl ResolveDevice for &File {
-    fn resolve_device(&self) -> Result<PathBuf, DeviceResolveError> {
+    fn resolve_device(&self) -> io::Result<PathBuf> {
         (*self).resolve_device()
     }
 }
@@ -165,14 +119,12 @@ fn minor(dev: u64) -> u32 {
 }
 
 /// Gets the device major:minor from a file descriptor using fstat.
-fn get_dev_from_fd(fd: i32) -> Result<(u32, u32), DeviceResolveError> {
+fn get_dev_from_fd(fd: i32) -> io::Result<(u32, u32)> {
     let mut stat_buf: libc::stat = unsafe { std::mem::zeroed() };
     let result = unsafe { libc::fstat(fd, &mut stat_buf) };
 
     if result != 0 {
-        return Err(DeviceResolveError::FstatError(
-            io::Error::last_os_error().to_string(),
-        ));
+        return Err(io::Error::last_os_error());
     }
 
     let dev = stat_buf.st_dev;
@@ -184,7 +136,7 @@ fn get_dev_from_fd(fd: i32) -> Result<(u32, u32), DeviceResolveError> {
 /// This function tries multiple resolution strategies:
 /// 1. First, try to resolve via `/sys/dev/block/{major}:{minor}`
 /// 2. If that fails, fall back to parsing `/proc/self/mountinfo`
-fn resolve_device_from_dev(major: u32, minor: u32) -> Result<PathBuf, DeviceResolveError> {
+fn resolve_device_from_dev(major: u32, minor: u32) -> io::Result<PathBuf> {
     // Try sysfs first
     if let Some(path) = resolve_via_sysfs(major, minor) {
         return Ok(path);
@@ -195,7 +147,10 @@ fn resolve_device_from_dev(major: u32, minor: u32) -> Result<PathBuf, DeviceReso
         return Ok(path);
     }
 
-    Err(DeviceResolveError::DeviceNotFound { major, minor })
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("Could not resolve device for dev {}:{}", major, minor),
+    ))
 }
 
 /// Resolves a device path via the sysfs interface.
@@ -234,7 +189,7 @@ fn resolve_via_sysfs(major: u32, minor: u32) -> Option<PathBuf> {
 /// - filesystem type
 /// - mount source
 /// - super options
-fn resolve_via_mountinfo(major: u32, minor: u32) -> Result<Option<PathBuf>, DeviceResolveError> {
+fn resolve_via_mountinfo(major: u32, minor: u32) -> io::Result<Option<PathBuf>> {
     let mountinfo_path = Path::new("/proc/self/mountinfo");
     if !mountinfo_path.exists() {
         return Ok(None);
@@ -308,9 +263,9 @@ fn parse_dev_field(field: &str) -> Option<(u32, u32)> {
 ///
 /// let device = resolve_device(Path::new("/home"))?;
 /// println!("Device: {}", device.display());
-/// # Ok::<(), blkpath::DeviceResolveError>(())
+/// # Ok::<(), std::io::Error>(())
 /// ```
-pub fn resolve_device<P: AsRef<Path>>(path: P) -> Result<PathBuf, DeviceResolveError> {
+pub fn resolve_device<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
     path.as_ref().resolve_device()
 }
 
@@ -325,9 +280,9 @@ pub fn resolve_device<P: AsRef<Path>>(path: P) -> Result<PathBuf, DeviceResolveE
 /// let file = File::open("/home")?;
 /// let device = resolve_device_from_file(&file)?;
 /// println!("Device: {}", device.display());
-/// # Ok::<(), blkpath::DeviceResolveError>(())
+/// # Ok::<(), std::io::Error>(())
 /// ```
-pub fn resolve_device_from_file(file: &File) -> Result<PathBuf, DeviceResolveError> {
+pub fn resolve_device_from_file(file: &File) -> io::Result<PathBuf> {
     file.resolve_device()
 }
 
@@ -339,9 +294,9 @@ mod tests {
 
     #[test]
     fn test_major_minor_extraction() {
-        // Test with known values
-        // On Linux, makedev(8, 1) = 0x801 for block devices
-        let dev = 0x0801_u64; // major=8, minor=1 (sda1 typically)
+        // Test with a known simple/legacy device number encoding:
+        // for major=8, minor=1 the legacy dev_t value is 0x0801.
+        let dev = 0x0801_u64; // legacy/simple dev_t for major=8, minor=1 (e.g. sda1)
         assert_eq!(major(dev), 8);
         assert_eq!(minor(dev), 1);
     }
